@@ -2,41 +2,29 @@ import streamlit as st
 from google import genai
 from google.genai import types
 from datetime import datetime
+import os
 
 # 1. Configuração da página
 st.set_page_config(page_title="Viaja-AI Pro", page_icon="✈️")
 st.title("✈️ Viaja-AI Pro")
-st.caption("Agente de Viagens com Google Search (Gemini 2.0)")
+st.caption("Agente de Viagens Automático (Gemini 2.0)")
 
-# 2. Configuração da Chave API (Barra Lateral)
-with st.sidebar:
-    st.header("⚙️ Configuração")
-    if "api_key" not in st.session_state:
-        st.session_state.api_key = ""
-    
-    # Campo de senha que atualiza a memória
-    key_input = st.text_input("Cole sua API Key aqui:", type="password", value=st.session_state.api_key)
-    if key_input:
-        st.session_state.api_key = key_input
-
-# Trava de segurança: Se não tiver chave, para tudo aqui.
-if not st.session_state.api_key:
-    st.warning("⬅️ Cole sua API Key na barra lateral para iniciar.")
+# 2. CARREGAMENTO AUTOMÁTICO DA CHAVE (DO COFRE)
+# Em vez de pedir na tela, tentamos pegar dos "Segredos" do Streamlit
+try:
+    # Tenta pegar a chave que você salvou no site (Secrets)
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    st.error("❌ ERRO: Chave de API não encontrada!")
+    st.info("Vá em 'Manage App' > 'Settings' > 'Secrets' e adicione: GEMINI_API_KEY = 'sua-chave'")
     st.stop()
 
-# 3. Inicialização do Cliente e do Chat (A CORREÇÃO ESTÁ AQUI)
-# Usamos o 'session_state' para manter o Cliente VIVO entre os cliques.
-
-if "my_client" not in st.session_state:
-    try:
-        # Cria o cliente apenas UMA vez e guarda na memória
-        st.session_state.my_client = genai.Client(api_key=st.session_state.api_key)
-    except Exception as e:
-        st.error(f"Erro ao criar cliente: {e}")
-        st.stop()
-
+# 3. Inicialização do Cliente e do Chat (AUTOMÁTICA)
 if "chat_session" not in st.session_state:
     try:
+        # Cria o cliente usando a chave automática
+        client = genai.Client(api_key=API_KEY)
+        
         # Configura a ferramenta de busca
         google_search_tool = types.Tool(
             google_search=types.GoogleSearch()
@@ -44,8 +32,8 @@ if "chat_session" not in st.session_state:
         
         hoje = datetime.now().strftime("%d/%m/%Y")
         
-        # Inicia o chat usando o cliente QUE JÁ ESTÁ NA MEMÓRIA
-        st.session_state.chat_session = st.session_state.my_client.chats.create(
+        # Inicia o chat
+        st.session_state.chat_session = client.chats.create(
             model='gemini-2.0-flash',
             config=types.GenerateContentConfig(
                 tools=[google_search_tool],
@@ -53,10 +41,10 @@ if "chat_session" not in st.session_state:
             )
         )
     except Exception as e:
-        st.error(f"Erro ao iniciar chat: {e}")
+        st.error(f"Erro ao conectar: {e}")
         st.stop()
 
-# 4. Exibe o Histórico de Mensagens
+# 4. Histórico de Mensagens
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -64,27 +52,17 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 5. Área de Chat (Interação do Usuário)
-if prompt := st.chat_input("Ex: Passagem para Recife em Julho de 2026"):
+# 5. Área de Chat
+if prompt := st.chat_input("Para onde vamos viajar?"):
     
-    # Mostra mensagem do usuário
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # Resposta do Agente
     with st.chat_message("assistant"):
         with st.spinner("Pesquisando..."):
             try:
-                # Envia mensagem para a sessão ativa na memória
                 response = st.session_state.chat_session.send_message(prompt)
-                
                 st.markdown(response.text)
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
-            
             except Exception as e:
-                st.error(f"Erro de conexão: {e}")
-                # Botão de emergência para reiniciar se a net cair
-                if st.button("Reiniciar Conexão"):
-                    for key in list(st.session_state.keys()):
-                        del st.session_state[key]
-                    st.rerun()
+                st.error("A conexão caiu. Tente recarregar a página.")
