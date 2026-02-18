@@ -3,77 +3,88 @@ from google import genai
 from google.genai import types
 from datetime import datetime
 
-# 1. CONFIGURAÇÃO DA PÁGINA (TÍTULO E ÍCONE)
-st.set_page_config(page_title="Viaja-AI Pro", page_icon="✈️", layout="centered")
-
+# 1. Configuração da página
+st.set_page_config(page_title="Viaja-AI Pro", page_icon="✈️")
 st.title("✈️ Viaja-AI Pro")
-st.caption("Seu Consultor de Viagens com Google Search em Tempo Real")
+st.caption("Agente de Viagens com Google Search (Gemini 2.0)")
 
-# 2. BARRA LATERAL PARA SEGURANÇA (Para não deixar a chave exposta no código)
+# 2. Configuração da Chave API (Barra Lateral)
 with st.sidebar:
     st.header("⚙️ Configuração")
-    api_key = st.text_input("Cole sua Google API Key:", type="password")
-    st.info("A chave não fica salva. É usada apenas nesta sessão.")
+    if "api_key" not in st.session_state:
+        st.session_state.api_key = ""
+    
+    # Campo de senha que atualiza a memória
+    key_input = st.text_input("Cole sua API Key aqui:", type="password", value=st.session_state.api_key)
+    if key_input:
+        st.session_state.api_key = key_input
 
-# 3. VERIFICA SE TEM CHAVE
-if not api_key:
-    st.warning("⬅️ Por favor, insira sua API Key na barra lateral para começar.")
+# Trava de segurança: Se não tiver chave, para tudo aqui.
+if not st.session_state.api_key:
+    st.warning("⬅️ Cole sua API Key na barra lateral para iniciar.")
     st.stop()
 
-# 4. CONFIGURAÇÃO DO CLIENTE E MEMÓRIA (SESSION STATE)
-# O Streamlit roda o código todo a cada clique. Precisamos guardar o chat na memória.
+# 3. Inicialização do Cliente e do Chat (A CORREÇÃO ESTÁ AQUI)
+# Usamos o 'session_state' para manter o Cliente VIVO entre os cliques.
 
+if "my_client" not in st.session_state:
+    try:
+        # Cria o cliente apenas UMA vez e guarda na memória
+        st.session_state.my_client = genai.Client(api_key=st.session_state.api_key)
+    except Exception as e:
+        st.error(f"Erro ao criar cliente: {e}")
+        st.stop()
+
+if "chat_session" not in st.session_state:
+    try:
+        # Configura a ferramenta de busca
+        google_search_tool = types.Tool(
+            google_search=types.GoogleSearch()
+        )
+        
+        hoje = datetime.now().strftime("%d/%m/%Y")
+        
+        # Inicia o chat usando o cliente QUE JÁ ESTÁ NA MEMÓRIA
+        st.session_state.chat_session = st.session_state.my_client.chats.create(
+            model='gemini-2.0-flash',
+            config=types.GenerateContentConfig(
+                tools=[google_search_tool],
+                system_instruction=f"Você é um agente de viagens experiente. Hoje é {hoje}. Use o Google Search para achar preços reais e links."
+            )
+        )
+    except Exception as e:
+        st.error(f"Erro ao iniciar chat: {e}")
+        st.stop()
+
+# 4. Exibe o Histórico de Mensagens
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "chat_session" not in st.session_state:
-    # Inicia o cliente apenas uma vez
-    client = genai.Client(api_key=api_key)
-    
-    # Ferramenta de Busca
-    google_search_tool = types.Tool(
-        google_search=types.GoogleSearch()
-    )
-    
-    hoje = datetime.now().strftime("%d/%m/%Y")
-    
-    # Inicia o Chat
-    st.session_state.chat_session = client.chats.create(
-        model='gemini-2.0-flash',
-        config=types.GenerateContentConfig(
-            tools=[google_search_tool],
-            system_instruction=f"""
-            Você é o Viaja-AI Pro. Hoje é {hoje}.
-            Seu objetivo é planejar viagens usando dados REAIS do Google Search.
-            Sempre cite preços e links. Seja cordial e use emojis.
-            """
-        )
-    )
-
-# 5. EXIBE O HISTÓRICO NA TELA (INTERFACE TIPO WHATSAPP)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 6. CAPTURA A MENSAGEM DO USUÁRIO
-if prompt := st.chat_input("Para onde vamos viajar?"):
+# 5. Área de Chat (Interação do Usuário)
+if prompt := st.chat_input("Ex: Passagem para Recife em Julho de 2026"):
     
-    # Mostra a mensagem do usuário na tela
+    # Mostra mensagem do usuário
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # O Agente Pensa e Responde
+    # Resposta do Agente
     with st.chat_message("assistant"):
-        with st.spinner("Pesquisando no Google..."):
+        with st.spinner("Pesquisando..."):
             try:
-                # Envia para o Gemini
+                # Envia mensagem para a sessão ativa na memória
                 response = st.session_state.chat_session.send_message(prompt)
                 
-                # Mostra a resposta
                 st.markdown(response.text)
-                
-                # Salva no histórico
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
-                
+            
             except Exception as e:
-                st.error(f"Erro: {e}")
+                st.error(f"Erro de conexão: {e}")
+                # Botão de emergência para reiniciar se a net cair
+                if st.button("Reiniciar Conexão"):
+                    for key in list(st.session_state.keys()):
+                        del st.session_state[key]
+                    st.rerun()
