@@ -1,3 +1,4 @@
+# versão 1.1
 streamlit
 google-genai
 streamlit-audiorecorder
